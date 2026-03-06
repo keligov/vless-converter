@@ -1,0 +1,107 @@
+package com.vless.converter
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Bundle
+import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import org.json.JSONObject
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var etConfig: EditText
+    private lateinit var btnConvert: Button
+    private lateinit var tvResult: TextView
+    private lateinit var btnCopy: Button
+    private lateinit var tvDetails: TextView
+    private lateinit var resultCard: LinearLayout
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        etConfig = findViewById(R.id.etConfig)
+        btnConvert = findViewById(R.id.btnConvert)
+        tvResult = findViewById(R.id.tvResult)
+        btnCopy = findViewById(R.id.btnCopy)
+        tvDetails = findViewById(R.id.tvDetails)
+        resultCard = findViewById(R.id.resultCard)
+
+        resultCard.visibility = android.view.View.GONE
+
+        btnConvert.setOnClickListener {
+            val json = etConfig.text.toString().trim()
+            if (json.isEmpty()) {
+                Toast.makeText(this, "Вставьте JSON конфиг!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            try {
+                val link = parseConfig(json)
+                tvResult.text = link
+                resultCard.visibility = android.view.View.VISIBLE
+                Toast.makeText(this, "✅ Готово!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "❌ Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
+                resultCard.visibility = android.view.View.GONE
+            }
+        }
+
+        btnCopy.setOnClickListener {
+            val link = tvResult.text.toString()
+            if (link.isNotEmpty()) {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("vless_link", link))
+                Toast.makeText(this, "📋 Скопировано!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun parseConfig(jsonText: String): String {
+        val cfg = JSONObject(jsonText)
+        val outbounds = cfg.getJSONArray("outbounds")
+
+        var outbound: JSONObject? = null
+        for (i in 0 until outbounds.length()) {
+            val o = outbounds.getJSONObject(i)
+            if (o.getString("protocol") == "vless") {
+                outbound = o
+                break
+            }
+        }
+        requireNotNull(outbound) { "VLESS outbound не найден" }
+
+        val vnext = outbound.getJSONObject("settings")
+            .getJSONArray("vnext").getJSONObject(0)
+        val user = vnext.getJSONArray("users").getJSONObject(0)
+        val stream = outbound.getJSONObject("streamSettings")
+        val reality = stream.getJSONObject("realitySettings")
+
+        val id = user.getString("id")
+        val address = vnext.getString("address")
+        val port = vnext.getInt("port")
+
+        val params = mutableListOf<String>()
+        params.add("encryption=${user.optString("encryption", "none")}")
+        if (user.has("flow") && user.getString("flow").isNotEmpty())
+            params.add("flow=${user.getString("flow")}")
+        params.add("type=${stream.optString("network", "tcp")}")
+        params.add("security=${stream.optString("security", "reality")}")
+        if (reality.has("fingerprint")) params.add("fp=${reality.getString("fingerprint")}")
+        if (reality.has("publicKey")) params.add("pbk=${reality.getString("publicKey")}")
+        if (reality.has("serverName")) params.add("sni=${reality.getString("serverName")}")
+        if (reality.has("shortId")) params.add("sid=${reality.getString("shortId")}")
+
+        val details = buildString {
+            appendLine("🔑 ID: $id")
+            appendLine("🌐 Адрес: $address:$port")
+            appendLine("🔒 Security: ${stream.optString("security")}")
+            appendLine("🌊 Flow: ${user.optString("flow")}")
+            appendLine("🖥 SNI: ${reality.optString("serverName")}")
+        }
+        tvDetails.text = details
+
+        return "vless://$id@$address:$port?${params.joinToString("&")}#MyVless"
+    }
+}
